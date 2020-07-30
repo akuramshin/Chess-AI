@@ -124,8 +124,67 @@ function MiniMax(board_fen, color, max, depth){
   }
 }
 
+function AlphaBeta(board_fen, color, max, depth, alpha, beta){
+  var board = new Chess(board_fen)
+
+  if (board.game_over() || depth == 0){
+    return [null, heuristic(board_fen, color)]
+  }
+
+  var possibleMoves = board.moves()
+  possibleMoves.sort(function (move) {
+    var copy = new Chess(board_fen)
+    copy.move(move)
+    return heuristic(copy.fen(), color)
+  })
+
+  if (max){
+    var currMove = null
+
+    for (var i = 0; i < possibleMoves.length; i++){
+      board.move(possibleMoves[i])
+      var move_val = AlphaBeta(board.fen(), color, false, depth-1, alpha, beta)
+
+      if (move_val[1] > alpha){
+        alpha = move_val[1]
+        currMove = possibleMoves[i]
+      }
+      if (beta <= alpha){
+        break
+      }
+      board = new Chess(board_fen)
+    }
+    return [currMove, alpha]
+  }
+  else {
+    var currMove = null
+
+    for (var i = 0; i < possibleMoves.length; i++){
+      board.move(possibleMoves[i])
+      var move_val = AlphaBeta(board.fen(), color, true, depth-1, alpha, beta)
+
+      if (move_val[1] < beta){
+        beta = move_val[1]
+        currMove = possibleMoves[i]
+      }
+      if (beta <= alpha){
+        break
+      }
+      board = new Chess(board_fen)
+    }
+    return [currMove, beta]
+  }
+}
+
 function makeMinMaxMove() {
   var move = MiniMax(game.fen(), ai_color, true, 2)
+  console.log(`Move ${move[0]} has value ${move[1]}`)
+  game.move(move[0])
+  chess_board.position(game.fen())
+}
+
+function makeAlphaBetaMove(){
+  var move = AlphaBeta(game.fen(), ai_color, true, 3, -1*Infinity, Infinity)
   console.log(`Move ${move[0]} has value ${move[1]}`)
   game.move(move[0])
   chess_board.position(game.fen())
@@ -143,7 +202,7 @@ function onDrop (source, target) {
   if (move === null) return 'snapback'
 
   // make random legal move for black
-  window.setTimeout(makeMinMaxMove, 250)
+  window.setTimeout(makeAlphaBetaMove, 250)
 }
 
 // update the board position after the piece snap
