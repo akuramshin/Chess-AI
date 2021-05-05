@@ -1,6 +1,7 @@
 var chess_board = null
 var game = new Chess()
 var ai_color = 'b'
+var nodes = new Map()
 
 function onDragStart (source, piece, position, orientation) {
   // do not pick up pieces if the game is over
@@ -77,6 +78,9 @@ function heuristic(board_fen, color) {
   else {
     var other_color = 'b'
   }
+
+  // Positional heuristic
+  
 
   return piece_value(board_fen, color) - piece_value(board_fen, other_color)
 }
@@ -176,17 +180,197 @@ function AlphaBeta(board_fen, color, max, depth, alpha, beta){
   }
 }
 
+class State {
+  constructor(game_fen, color, move){
+    this.game_fen = game_fen
+    this.color = color
+    this.move = move
+  }
+}
+
+class Node {
+    constructor(parent, state, plays){
+      this.parent = parent
+      this.children = []
+      this.state = state
+
+      this.wins = 0
+      this.simulations = 0
+
+      this.unexpandedPlays = plays;
+      let game = new Chess(this.state.game_fen)
+      this.gameOver = game.game_over()
+    }
+
+    getUnexpandedPlays() {
+      return this.unexpandedPlays
+    }
+
+    expand(move) {
+      let board = new Chess(this.state.game_fen)
+      board.move(move)
+
+      let index = this.unexpandedPlays.indexOf(move)
+      this.unexpandedPlays.splice(index, 1)
+
+      let next_state = new State(board.fen(), board.turn(), move)
+      let child_node = new Node(this, next_state, board.moves())
+      this.children.push(child_node)
+      nodes.set(board.fen(), child_node)
+      
+      return child_node
+    }
+
+    getUCB1(c) {
+      return (this.wins/this.simulations) + c*(Math.sqrt(Math.log(this.parent.simulations)/this.simulations))
+    }
+
+    isFullyExpanded() {
+      return this.unexpandedPlays.length == 0
+    }
+
+    isLeaf() {
+      return this.gameOver
+    }
+}
+
+
+function MCTS(root, timeout, c){
+
+  let end = Date.now() + timeout * 1000
+  while (Date.now() < end) {
+
+    // Phase 1: Select
+    let node = MCTSelect(root, c)
+
+    if (node.isLeaf() === false) {
+      // Phase 2: Expand
+      node = MCTExpand(node)
+    }
+    // Phase 3: Simulate
+    winner = MCTSimulate(node)
+
+    // Phase 4: Backpropogate
+    MCTBackpropogate(node, winner)
+  }
+
+  // If not all children are expanded, not enough information
+  // if (root.isFullyExpanded() === false)
+  //   throw new Error(`Not enough information! Size: ${root.getUnexpandedPlays().length}`)
+
+  let allPlays = root.children
+  let bestPlay
+  let max = -Infinity
+
+  for (let child of allPlays) {
+    if (child.simulations > max) {
+      bestPlay = child
+      max = child.simulations
+    }
+  }
+
+  return bestPlay
+}
+
+function MCTSelect(node, c) {
+  while (node.isFullyExpanded() && !node.isLeaf()){
+    let max_val = -Infinity
+    let max_child
+
+    for (let child of node.children){
+      let child_val = child.getUCB1(c)
+
+      if (child_val > max_val){
+        max_val = child_val
+        max_child = child
+      }
+    }
+    node = max_child
+  }
+
+  return node
+}
+
+function MCTExpand(node) {
+  let plays = node.getUnexpandedPlays()
+  let index = Math.floor(Math.random() * plays.length)
+  let play = plays[index]
+
+  return node.expand(play)
+}
+
+function MCTSimulate(node) {
+  let state = node.state
+  let game = new Chess(state.game_fen)
+  let gameOver = game.game_over()
+
+  while (gameOver === false) {
+    let plays = game.moves()
+    let play = plays[Math.floor(Math.random() * plays.length)]
+
+    game.move(play)
+    gameOver = game.game_over()
+  }
+
+  let winner
+  if (game.in_checkmate()){
+    winner = (game.turn() === 'b') ? 'b' : 'w';
+  }
+  else {
+    winner = 't'
+  }
+
+  return winner
+}
+
+function MCTBackpropogate(node, winner) {
+  let state = node.state
+
+  if (winner == state.color) {
+    node.wins += 1
+  }
+  else if (winner == 't') {
+    node.wins += 0.5
+  }
+  node.simulations += 1
+
+  if (node.parent == null){
+    return
+  }
+  MCTBackpropogate(node.parent, winner)
+}
+
 function makeMinMaxMove() {
-  var move = MiniMax(game.fen(), ai_color, true, 2)
+  let move = MiniMax(game.fen(), ai_color, true, 2)
   console.log(`Move ${move[0]} has value ${move[1]}`)
   game.move(move[0])
   chess_board.position(game.fen())
 }
 
 function makeAlphaBetaMove(){
-  var move = AlphaBeta(game.fen(), ai_color, true, 3, -1*Infinity, Infinity)
+  let move = AlphaBeta(game.fen(), ai_color, true, 4, -1*Infinity, Infinity)
   console.log(`Move ${move[0]} has value ${move[1]}`)
   game.move(move[0])
+  chess_board.position(game.fen())
+}
+
+function makeMCTSMove(){
+
+  let state_fen = game.fen()
+  let node
+  if (!nodes.has(state_fen)) {
+    let state = new State(state_fen, game.turn(), null)
+    node = new Node(null, state, game.moves())
+    nodes.set(state_fen, node)
+  }
+  else {
+    console.log("Found!")
+    node = nodes.get(state_fen)
+  }
+
+  let move_node = MCTS(node, 4, Math.sqrt(2))
+  console.log(`Move ${move_node.state.move} has value ${move_node.wins}/${move_node.simulations}`)
+  game.move(move_node.state.move)
   chess_board.position(game.fen())
 }
 
@@ -202,7 +386,13 @@ function onDrop (source, target) {
   if (move === null) return 'snapback'
 
   // make random legal move for black
-  window.setTimeout(makeAlphaBetaMove, 250)
+  // makeRandomMove()
+
+  // make alpha beta pruning move
+  window.setTimeout(makeAlphaBetaMove, 4000)
+  //makeAlphaBetaMove()
+
+  //makeMCTSMove()
 }
 
 // update the board position after the piece snap
@@ -219,3 +409,11 @@ var config = {
   onSnapEnd: onSnapEnd
 }
 chess_board = Chessboard('board', config)
+
+// let state_fen = game.fen()
+// let state = new State(state_fen, game.turn(), null)
+// node = new Node(null, state, game.moves())
+// nodes.set(state_fen, node)
+
+// let move_node = MCTS(node, 60, Math.sqrt(2))
+// console.log("Done!")
